@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <style>
   :root{
     --bg: #05080a;
@@ -142,6 +143,23 @@
 
   .hidden{display:none !important;}
 
+  .orDivider{display:flex; align-items:center; gap:10px; margin:14px 0; color:var(--ink-dim); font-size:0.7rem; letter-spacing:0.15em; text-transform:uppercase;}
+  .orDivider::before,.orDivider::after{content:""; flex:1; height:1px; background:var(--panel-border);}
+
+  #scanOverlay{
+    position:fixed; inset:0; background:#000; z-index:100;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  #scanOverlay video{width:100%; max-width:480px; border:1px solid var(--phosphor); border-radius:2px;}
+  #scanOverlay .scanFrame{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(70vw,300px); height:min(70vw,300px); pointer-events:none;
+    border:2px solid var(--phosphor); box-shadow:0 0 0 999px rgba(0,0,0,0.5); border-radius:8px;
+  }
+  #scanStatus{color:var(--ink); font-size:0.85rem; margin-top:16px; letter-spacing:0.08em; text-align:center; padding:0 20px;}
+
+  .errorText{color:var(--red); font-size:0.78rem; margin-top:8px; letter-spacing:0.04em;}
+
   ::selection{background:var(--phosphor); color:#000;}
 </style>
 </head>
@@ -222,6 +240,8 @@
     </div>
 
     <div class="panel" data-tag="connect to pc">
+      <button class="btn full amber" onclick="startScan()">Scan PC's QR Code</button>
+      <div class="orDivider">or enter manually</div>
       <label for="peerIdInput">PC pairing code</label>
       <input type="text" id="peerIdInput" placeholder="e.g. a1b2c3d4">
       <button class="btn full" style="margin-top:12px;" onclick="connectToPc()">Connect</button>
@@ -229,6 +249,7 @@
         <div class="statusDot" id="phoneStatusDot"></div>
         <div class="statusText" id="phoneStatusText">not connected</div>
       </div>
+      <div class="errorText hidden" id="phoneErrorText"></div>
     </div>
 
     <div class="panel" data-tag="live orientation">
@@ -243,10 +264,33 @@
 
 </div>
 
+<div id="scanOverlay" class="hidden">
+  <video id="scanVideo" playsinline muted></video>
+  <div class="scanFrame"></div>
+  <div id="scanStatus">Point the camera at the PC's QR code</div>
+  <button class="btn small amber" style="margin-top:18px; position:relative; z-index:2;" onclick="stopScan()">Cancel</button>
+</div>
+<canvas id="scanCanvas" class="hidden"></canvas>
+
 <script>
 /* ---------- shared ---------- */
 function reload(){ location.href = location.pathname; }
 const params = new URLSearchParams(location.search);
+
+/* Public STUN + free TURN relay (openrelay) — without a TURN fallback, phone
+   and PC on different networks (e.g. cellular vs wifi, guest wifi with AP
+   isolation) will silently fail to establish a direct connection. */
+const PEER_OPTS = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+    ]
+  }
+};
 
 function setRole(role){
   document.getElementById('screen-role').classList.add('hidden');
@@ -296,7 +340,7 @@ function updateRadar(relDeg){
 let pcPeer, pcConn, audioCtx, panner, listener, sourceOffset = 0, latestYaw = 0, pitchOn = false;
 
 function initPc(){
-  pcPeer = new Peer();
+  pcPeer = new Peer(PEER_OPTS);
   pcPeer.on('open', id => {
     document.getElementById('pcId').textContent = id;
     document.getElementById('qrHolder').innerHTML = '';
@@ -307,15 +351,30 @@ function initPc(){
   });
   pcPeer.on('connection', conn => {
     pcConn = conn;
-    document.getElementById('pcStatusDot').classList.add('live');
-    document.getElementById('pcStatusText').textContent = 'phone linked · streaming';
-    document.getElementById('pcStatusText').classList.add('live');
+    document.getElementById('pcStatusText').textContent = 'phone found · negotiating…';
+    conn.on('open', () => {
+      document.getElementById('pcStatusDot').classList.add('live');
+      document.getElementById('pcStatusText').textContent = 'phone linked · streaming';
+      document.getElementById('pcStatusText').classList.add('live');
+    });
     conn.on('data', handleOrientation);
     conn.on('close', () => {
       document.getElementById('pcStatusDot').classList.remove('live');
       document.getElementById('pcStatusText').textContent = 'phone disconnected';
       document.getElementById('pcStatusText').classList.remove('live');
     });
+    conn.on('error', err => {
+      document.getElementById('pcStatusText').textContent = 'connection error — see console';
+      console.error('PC data connection error:', err);
+    });
+  });
+  pcPeer.on('disconnected', () => {
+    document.getElementById('pcStatusText').textContent = 'signaling lost · reconnecting…';
+    pcPeer.reconnect();
+  });
+  pcPeer.on('error', err => {
+    document.getElementById('pcStatusText').textContent = 'peer error: ' + err.type;
+    console.error('PC peer error:', err);
   });
 
   document.getElementById('pitchToggle').addEventListener('change', e => pitchOn = e.target.checked);
@@ -421,13 +480,39 @@ function onOrientation(e){
   }
 }
 
+function setPhoneError(msg){
+  const el = document.getElementById('phoneErrorText');
+  if(msg){ el.textContent = msg; el.classList.remove('hidden'); }
+  else { el.classList.add('hidden'); }
+}
+
 function connectToPc(){
   const id = document.getElementById('peerIdInput').value.trim();
-  if(!id) return;
-  phonePeer = new Peer();
-  phonePeer.on('open', () => {
-    phoneConn = phonePeer.connect(id);
+  if(!id){ setPhoneError('Enter or scan a pairing code first.'); return; }
+  setPhoneError(null);
+  document.getElementById('phoneStatusText').textContent = 'connecting…';
+
+  if(!phonePeer){
+    phonePeer = new Peer(PEER_OPTS);
+    phonePeer.on('disconnected', () => phonePeer.reconnect());
+    phonePeer.on('error', err => {
+      setPhoneError('Peer error: ' + err.type + '. Check your internet connection and try again.');
+      document.getElementById('phoneStatusText').textContent = 'error';
+    });
+  }
+
+  const openPeerAndConnect = () => {
+    phoneConn = phonePeer.connect(id, { reliable: true });
+    const timeout = setTimeout(() => {
+      if(!phoneConn.open){
+        setPhoneError('Connection timed out. Double-check the code, make sure the PC tab is still open, and that neither device is on a network that blocks WebRTC (some public/guest wifi does).');
+        document.getElementById('phoneStatusText').textContent = 'timed out';
+      }
+    }, 10000);
+
     phoneConn.on('open', () => {
+      clearTimeout(timeout);
+      setPhoneError(null);
       document.getElementById('phoneStatusDot').classList.add('live');
       document.getElementById('phoneStatusText').textContent = 'connected · streaming';
       document.getElementById('phoneStatusText').classList.add('live');
@@ -437,7 +522,71 @@ function connectToPc(){
       document.getElementById('phoneStatusText').textContent = 'disconnected';
       document.getElementById('phoneStatusText').classList.remove('live');
     });
-  });
+    phoneConn.on('error', err => {
+      clearTimeout(timeout);
+      setPhoneError('Connection error: ' + (err.message || err.type || err));
+      document.getElementById('phoneStatusText').textContent = 'error';
+    });
+  };
+
+  if(phonePeer.open) openPeerAndConnect();
+  else phonePeer.on('open', openPeerAndConnect);
+}
+
+/* ---------- in-page QR scanner ---------- */
+let scanStream = null, scanRAF = null;
+
+function startScan(){
+  const overlay = document.getElementById('scanOverlay');
+  const video = document.getElementById('scanVideo');
+  const canvas = document.getElementById('scanCanvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const statusEl = document.getElementById('scanStatus');
+  statusEl.textContent = "Point the camera at the PC's QR code";
+  overlay.classList.remove('hidden');
+
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    .then(stream => {
+      scanStream = stream;
+      video.srcObject = stream;
+      video.play();
+      scanRAF = requestAnimationFrame(tick);
+    })
+    .catch(() => {
+      statusEl.textContent = 'Camera access denied — enable it in your browser settings, or enter the code manually below.';
+    });
+
+  function tick(){
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if(code && code.data){
+        let extracted = null;
+        try{
+          const url = new URL(code.data);
+          extracted = url.searchParams.get('peer');
+        } catch(e){
+          extracted = code.data; // fall back to treating scanned text as the raw code
+        }
+        if(extracted){
+          document.getElementById('peerIdInput').value = extracted;
+          stopScan();
+          connectToPc();
+          return;
+        }
+      }
+    }
+    scanRAF = requestAnimationFrame(tick);
+  }
+}
+
+function stopScan(){
+  if(scanStream){ scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+  if(scanRAF){ cancelAnimationFrame(scanRAF); scanRAF = null; }
+  document.getElementById('scanOverlay').classList.add('hidden');
 }
 </script>
 </body>
