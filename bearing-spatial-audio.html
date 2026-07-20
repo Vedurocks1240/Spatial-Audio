@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BEARING — Head-Tracked Spatial Audio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{
+    --bg: #05080a;
+    --bg-2: #0a0f12;
+    --phosphor: #3dff8a;
+    --phosphor-dim: #16522f;
+    --amber: #ffb238;
+    --red: #ff4d4d;
+    --ink: #b9ffd4;
+    --ink-dim: #5b8d70;
+    --grid: rgba(61,255,138,0.08);
+    --panel-border: rgba(61,255,138,0.25);
+    font-size: 16px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);}
+  body{
+    font-family:'JetBrains Mono', monospace;
+    color:var(--ink);
+    min-height:100vh;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(61,255,138,0.06), transparent 60%),
+      repeating-linear-gradient(0deg, var(--grid) 0px, var(--grid) 1px, transparent 1px, transparent 32px),
+      repeating-linear-gradient(90deg, var(--grid) 0px, var(--grid) 1px, transparent 1px, transparent 32px),
+      var(--bg);
+    overflow-x:hidden;
+  }
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px);
+    pointer-events:none; z-index:50; opacity:0.35;
+  }
+  h1,h2,h3{font-family:'Rajdhani',sans-serif; letter-spacing:0.04em; margin:0;}
+  .scanline{
+    position:fixed; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg, transparent, var(--phosphor), transparent);
+    opacity:0.5; animation:scan 5s linear infinite; z-index:51; pointer-events:none;
+  }
+  @keyframes scan{0%{transform:translateY(0);}100%{transform:translateY(100vh);}}
+
+  .wrap{max-width:640px; margin:0 auto; padding:28px 20px 80px;}
+
+  .brand{display:flex; align-items:baseline; gap:14px; margin-bottom:6px;}
+  .brand .mark{
+    width:14px;height:14px;border-radius:50%;
+    background:var(--phosphor); box-shadow:0 0 12px var(--phosphor), 0 0 30px var(--phosphor);
+    animation:pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  .brand h1{font-size:2rem; color:var(--phosphor); text-shadow:0 0 18px rgba(61,255,138,0.4); font-weight:700;}
+  .subtitle{color:var(--ink-dim); font-size:0.8rem; letter-spacing:0.15em; text-transform:uppercase; margin-bottom:36px; padding-left:28px;}
+
+  .panel{
+    border:1px solid var(--panel-border);
+    background:linear-gradient(180deg, rgba(61,255,138,0.03), rgba(0,0,0,0.2));
+    border-radius:2px;
+    padding:22px;
+    margin-bottom:18px;
+    position:relative;
+  }
+  .panel::before{
+    content: attr(data-tag);
+    position:absolute; top:-10px; left:16px; background:var(--bg);
+    padding:0 8px; font-size:0.68rem; letter-spacing:0.18em; color:var(--phosphor-dim); text-transform:uppercase;
+  }
+
+  .roleSelect{display:flex; flex-direction:column; gap:14px;}
+  .roleBtn{
+    display:flex; align-items:center; justify-content:space-between;
+    border:1px solid var(--panel-border); background:rgba(61,255,138,0.02);
+    color:var(--ink); font-family:'Rajdhani',sans-serif; font-weight:600; font-size:1.3rem;
+    letter-spacing:0.05em; padding:20px 22px; cursor:pointer; text-align:left;
+    transition:all .15s ease; border-radius:2px;
+  }
+  .roleBtn:hover{background:rgba(61,255,138,0.09); border-color:var(--phosphor); box-shadow:0 0 20px rgba(61,255,138,0.15);}
+  .roleBtn .arrow{color:var(--phosphor); font-size:1.4rem;}
+  .roleBtn small{display:block; font-family:'JetBrains Mono',monospace; font-weight:400; font-size:0.7rem; color:var(--ink-dim); letter-spacing:0.08em; margin-top:4px;}
+
+  .btn{
+    font-family:'Rajdhani',sans-serif; font-weight:700; letter-spacing:0.06em;
+    background:transparent; border:1px solid var(--phosphor); color:var(--phosphor);
+    padding:12px 20px; font-size:1rem; cursor:pointer; border-radius:2px;
+    text-transform:uppercase; transition:all .15s ease;
+  }
+  .btn:hover{background:rgba(61,255,138,0.12); box-shadow:0 0 18px rgba(61,255,138,0.25);}
+  .btn:disabled{opacity:0.3; cursor:not-allowed;}
+  .btn.amber{border-color:var(--amber); color:var(--amber);}
+  .btn.amber:hover{background:rgba(255,178,56,0.12); box-shadow:0 0 18px rgba(255,178,56,0.25);}
+  .btn.full{width:100%;}
+  .btn.small{padding:8px 14px; font-size:0.8rem;}
+
+  label{display:block; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:8px;}
+  input[type=text]{
+    width:100%; background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); color:var(--phosphor);
+    font-family:'JetBrains Mono',monospace; font-size:1rem; letter-spacing:0.08em; padding:12px; border-radius:2px;
+  }
+  input[type=text]:focus{outline:none; border-color:var(--phosphor);}
+  input[type=file]{color:var(--ink-dim); font-size:0.85rem; width:100%;}
+  input[type=range]{width:100%; accent-color: var(--phosphor); background:transparent;}
+
+  .row{display:flex; gap:10px; align-items:center;}
+  .statusDot{width:9px;height:9px;border-radius:50%; background:var(--red); box-shadow:0 0 8px var(--red); flex-shrink:0;}
+  .statusDot.live{background:var(--phosphor); box-shadow:0 0 10px var(--phosphor); animation:pulse 1.6s ease-in-out infinite;}
+  .statusText{font-size:0.8rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-dim);}
+  .statusText.live{color:var(--phosphor);}
+
+  #qrHolder{background:#fff; padding:10px; display:inline-block; border-radius:2px; margin-top:6px;}
+  .idCode{font-size:1.4rem; color:var(--amber); letter-spacing:0.15em; font-weight:700; margin:10px 0;}
+
+  .radarWrap{display:flex; justify-content:center; margin:20px 0 6px;}
+  svg#radar{width:100%; max-width:280px; height:auto;}
+  .readout{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:14px;}
+  .readout div{text-align:center; border:1px solid var(--panel-border); padding:8px 4px; border-radius:2px; background:rgba(0,0,0,0.2);}
+  .readout .val{font-size:1.3rem; color:var(--phosphor); font-weight:700;}
+  .readout .lbl{font-size:0.62rem; color:var(--ink-dim); letter-spacing:0.12em; text-transform:uppercase; margin-top:2px;}
+
+  .hint{font-size:0.78rem; color:var(--ink-dim); line-height:1.6; margin-top:10px;}
+  .hint b{color:var(--phosphor);}
+  a{color:var(--amber);}
+
+  .fileLabel{
+    display:block; border:1px dashed var(--panel-border); padding:18px; text-align:center;
+    cursor:pointer; border-radius:2px; color:var(--ink-dim); font-size:0.85rem; letter-spacing:0.06em;
+  }
+  .fileLabel:hover{border-color:var(--phosphor); color:var(--phosphor);}
+
+  audio{width:100%; margin-top:12px; filter:invert(0.9) hue-rotate(80deg) contrast(1.2);}
+
+  .backLink{cursor:pointer; color:var(--ink-dim); font-size:0.75rem; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:20px; display:inline-block;}
+  .backLink:hover{color:var(--phosphor);}
+
+  .hidden{display:none !important;}
+
+  ::selection{background:var(--phosphor); color:#000;}
+</style>
+</head>
+<body>
+<div class="scanline"></div>
+<div class="wrap">
+
+  <div class="brand"><div class="mark"></div><h1>BEARING</h1></div>
+  <div class="subtitle">head-tracked spatial audio · phone → pc link</div>
+
+  <!-- ROLE SELECT -->
+  <div id="screen-role">
+    <div class="panel" data-tag="select role">
+      <div class="roleSelect">
+        <button class="roleBtn" onclick="setRole('pc')">
+          <span>This device is the PC<br><small>plays audio · receives orientation</small></span>
+          <span class="arrow">→</span>
+        </button>
+        <button class="roleBtn" onclick="setRole('phone')">
+          <span>This device is the phone<br><small>tracks motion · sends orientation</small></span>
+          <span class="arrow">→</span>
+        </button>
+      </div>
+    </div>
+    <p class="hint">Open this page on <b>both</b> devices. Start with the PC — it generates a pairing code the phone scans or types in. Requires HTTPS on both ends for the phone's motion sensors to be accessible.</p>
+  </div>
+
+  <!-- PC SCREEN -->
+  <div id="screen-pc" class="hidden">
+    <span class="backLink" onclick="reload()">← change role</span>
+
+    <div class="panel" data-tag="pairing">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <label>Pairing code</label>
+          <div class="idCode" id="pcId">GENERATING…</div>
+        </div>
+        <div id="qrHolder"></div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <div class="statusDot" id="pcStatusDot"></div>
+        <div class="statusText" id="pcStatusText">waiting for phone</div>
+      </div>
+    </div>
+
+    <div class="panel" data-tag="audio source">
+      <label for="fileInput">Load a track</label>
+      <label class="fileLabel" id="fileLabel" for="fileInput">Click to choose an audio file from this device</label>
+      <input type="file" id="fileInput" accept="audio/*" class="hidden">
+      <audio id="player" controls class="hidden"></audio>
+    </div>
+
+    <div class="panel" data-tag="orientation">
+      <div class="radarWrap"><svg id="radar" viewBox="0 0 200 200"></svg></div>
+      <div class="readout">
+        <div><div class="val" id="valYaw">0°</div><div class="lbl">yaw</div></div>
+        <div><div class="val" id="valPitch">0°</div><div class="lbl">pitch</div></div>
+        <div><div class="val" id="valRel">0°</div><div class="lbl">relative</div></div>
+      </div>
+      <div class="row" style="margin-top:14px; gap:10px;">
+        <button class="btn small amber" onclick="setFront()">Set Front (recenter)</button>
+        <label class="row" style="gap:6px; margin:0; cursor:pointer;">
+          <input type="checkbox" id="pitchToggle" style="accent-color:var(--phosphor);">
+          <span style="font-size:0.75rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em;">pitch tilt</span>
+        </label>
+      </div>
+      <p class="hint">Hold the phone facing the direction you want to count as "front," then tap <b>Set Front</b>. As you turn your head, the track will pan around you in the stereo field.</p>
+    </div>
+  </div>
+
+  <!-- PHONE SCREEN -->
+  <div id="screen-phone" class="hidden">
+    <span class="backLink" onclick="reload()">← change role</span>
+
+    <div class="panel" data-tag="motion access">
+      <button class="btn full" id="motionBtn" onclick="enableMotion()">Enable Motion Sensors</button>
+      <p class="hint" id="motionHint">Tap to grant access to the gyroscope / compass.</p>
+    </div>
+
+    <div class="panel" data-tag="connect to pc">
+      <label for="peerIdInput">PC pairing code</label>
+      <input type="text" id="peerIdInput" placeholder="e.g. a1b2c3d4">
+      <button class="btn full" style="margin-top:12px;" onclick="connectToPc()">Connect</button>
+      <div class="row" style="margin-top:14px;">
+        <div class="statusDot" id="phoneStatusDot"></div>
+        <div class="statusText" id="phoneStatusText">not connected</div>
+      </div>
+    </div>
+
+    <div class="panel" data-tag="live orientation">
+      <div class="readout">
+        <div><div class="val" id="pYaw">0°</div><div class="lbl">yaw / α</div></div>
+        <div><div class="val" id="pPitch">0°</div><div class="lbl">pitch / β</div></div>
+        <div><div class="val" id="pRoll">0°</div><div class="lbl">roll / γ</div></div>
+      </div>
+      <p class="hint">Keep this tab open and the phone unlocked while tracking. Mount or hold the phone the way you'd wear tracked headphones — it's standing in for head orientation.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ---------- shared ---------- */
+function reload(){ location.href = location.pathname; }
+const params = new URLSearchParams(location.search);
+
+function setRole(role){
+  document.getElementById('screen-role').classList.add('hidden');
+  if(role === 'pc'){
+    document.getElementById('screen-pc').classList.remove('hidden');
+    initPc();
+  } else {
+    document.getElementById('screen-phone').classList.remove('hidden');
+    if(params.get('peer')) document.getElementById('peerIdInput').value = params.get('peer');
+  }
+}
+
+/* auto-jump to phone screen with prefilled code if arriving via QR scan */
+if(params.get('peer') && params.get('role') === 'phone'){
+  window.addEventListener('DOMContentLoaded', () => setRole('phone'));
+}
+
+/* ---------- radar drawing (PC) ---------- */
+const radarSvg = document.getElementById('radar');
+function drawRadarBase(){
+  radarSvg.innerHTML = `
+    <circle cx="100" cy="100" r="92" fill="none" stroke="rgba(61,255,138,0.25)" stroke-width="1"/>
+    <circle cx="100" cy="100" r="62" fill="none" stroke="rgba(61,255,138,0.15)" stroke-width="1"/>
+    <circle cx="100" cy="100" r="32" fill="none" stroke="rgba(61,255,138,0.15)" stroke-width="1"/>
+    <line x1="100" y1="8" x2="100" y2="192" stroke="rgba(61,255,138,0.12)" stroke-width="1"/>
+    <line x1="8" y1="100" x2="192" y2="100" stroke="rgba(61,255,138,0.12)" stroke-width="1"/>
+    <text x="100" y="20" fill="#3dff8a" font-size="9" text-anchor="middle" font-family="JetBrains Mono">FRONT</text>
+    <g id="listenerMark"></g>
+    <g id="sourceMark"><circle cx="100" cy="20" r="6" fill="#ffb238"><animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/></circle></g>
+  `;
+}
+drawRadarBase();
+
+function updateRadar(relDeg){
+  const rad = (relDeg) * Math.PI/180;
+  const r = 92;
+  const x = 100 + r * Math.sin(rad);
+  const y = 100 - r * Math.cos(rad);
+  const mark = document.getElementById('listenerMark');
+  mark.innerHTML = `
+    <line x1="100" y1="100" x2="${x}" y2="${y}" stroke="#3dff8a" stroke-width="2" opacity="0.7"/>
+    <polygon points="100,84 92,102 108,102" fill="#3dff8a" transform="rotate(${relDeg} 100 100)"/>
+  `;
+}
+
+/* ---------- PC logic ---------- */
+let pcPeer, pcConn, audioCtx, panner, listener, sourceOffset = 0, latestYaw = 0, pitchOn = false;
+
+function initPc(){
+  pcPeer = new Peer();
+  pcPeer.on('open', id => {
+    document.getElementById('pcId').textContent = id;
+    document.getElementById('qrHolder').innerHTML = '';
+    new QRCode(document.getElementById('qrHolder'), {
+      text: location.origin + location.pathname + '?peer=' + id + '&role=phone',
+      width: 120, height: 120
+    });
+  });
+  pcPeer.on('connection', conn => {
+    pcConn = conn;
+    document.getElementById('pcStatusDot').classList.add('live');
+    document.getElementById('pcStatusText').textContent = 'phone linked · streaming';
+    document.getElementById('pcStatusText').classList.add('live');
+    conn.on('data', handleOrientation);
+    conn.on('close', () => {
+      document.getElementById('pcStatusDot').classList.remove('live');
+      document.getElementById('pcStatusText').textContent = 'phone disconnected';
+      document.getElementById('pcStatusText').classList.remove('live');
+    });
+  });
+
+  document.getElementById('pitchToggle').addEventListener('change', e => pitchOn = e.target.checked);
+
+  document.getElementById('fileInput').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if(!f) return;
+    const player = document.getElementById('player');
+    player.src = URL.createObjectURL(f);
+    player.classList.remove('hidden');
+    document.getElementById('fileLabel').textContent = f.name;
+    setupAudioGraph(player);
+    player.play();
+  });
+}
+
+function setupAudioGraph(playerEl){
+  if(audioCtx) return; // only wire once per session
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaElementSource(playerEl);
+  panner = audioCtx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 1;
+  panner.positionZ.setValueAtTime(-1, audioCtx.currentTime); // fixed "front" source
+  src.connect(panner);
+  panner.connect(audioCtx.destination);
+  listener = audioCtx.listener;
+}
+
+function setFront(){
+  sourceOffset = latestYaw;
+}
+
+function handleOrientation(data){
+  latestYaw = data.a; // alpha
+  const relative = ((latestYaw - sourceOffset) % 360 + 360) % 360;
+  const relSigned = relative > 180 ? relative - 360 : relative;
+
+  document.getElementById('valYaw').textContent = Math.round(latestYaw) + '°';
+  document.getElementById('valPitch').textContent = Math.round(data.b) + '°';
+  document.getElementById('valRel').textContent = Math.round(relSigned) + '°';
+  updateRadar(relSigned);
+
+  if(listener){
+    const yawRad = relSigned * Math.PI/180;
+    const fx = Math.sin(yawRad), fz = -Math.cos(yawRad);
+    let upY = 1, upZ = 0;
+    if(pitchOn){
+      const pitchRad = (data.b || 0) * Math.PI/180 * 0.4;
+      upZ = Math.sin(pitchRad);
+      upY = Math.cos(pitchRad);
+    }
+    if(listener.forwardX && listener.forwardX.setValueAtTime){
+      const t = audioCtx.currentTime;
+      listener.forwardX.setValueAtTime(fx, t);
+      listener.forwardY.setValueAtTime(0, t);
+      listener.forwardZ.setValueAtTime(fz, t);
+      listener.upX.setValueAtTime(0, t);
+      listener.upY.setValueAtTime(upY, t);
+      listener.upZ.setValueAtTime(upZ, t);
+    } else if(listener.setOrientation){
+      listener.setOrientation(fx, 0, fz, 0, upY, upZ);
+    }
+  }
+}
+
+/* ---------- phone logic ---------- */
+let phonePeer, phoneConn, lastSent = 0;
+let currentAlpha = 0, currentBeta = 0, currentGamma = 0;
+
+function enableMotion(){
+  const btn = document.getElementById('motionBtn');
+  const finish = (granted) => {
+    if(granted){
+      btn.textContent = 'Motion Access Granted';
+      btn.disabled = true;
+      document.getElementById('motionHint').textContent = 'Sensors active. Now enter the PC pairing code below.';
+      window.addEventListener('deviceorientation', onOrientation);
+    } else {
+      document.getElementById('motionHint').textContent = 'Permission denied — motion access is required for this to work.';
+    }
+  };
+  if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+    DeviceOrientationEvent.requestPermission().then(state => finish(state === 'granted')).catch(() => finish(false));
+  } else {
+    finish(true); // non-iOS: no explicit permission gate
+  }
+}
+
+function onOrientation(e){
+  currentAlpha = e.alpha || 0;
+  currentBeta = e.beta || 0;
+  currentGamma = e.gamma || 0;
+  document.getElementById('pYaw').textContent = Math.round(currentAlpha) + '°';
+  document.getElementById('pPitch').textContent = Math.round(currentBeta) + '°';
+  document.getElementById('pRoll').textContent = Math.round(currentGamma) + '°';
+
+  const now = performance.now();
+  if(phoneConn && phoneConn.open && now - lastSent > 50){ // ~20Hz
+    phoneConn.send({ a: currentAlpha, b: currentBeta, g: currentGamma });
+    lastSent = now;
+  }
+}
+
+function connectToPc(){
+  const id = document.getElementById('peerIdInput').value.trim();
+  if(!id) return;
+  phonePeer = new Peer();
+  phonePeer.on('open', () => {
+    phoneConn = phonePeer.connect(id);
+    phoneConn.on('open', () => {
+      document.getElementById('phoneStatusDot').classList.add('live');
+      document.getElementById('phoneStatusText').textContent = 'connected · streaming';
+      document.getElementById('phoneStatusText').classList.add('live');
+    });
+    phoneConn.on('close', () => {
+      document.getElementById('phoneStatusDot').classList.remove('live');
+      document.getElementById('phoneStatusText').textContent = 'disconnected';
+      document.getElementById('phoneStatusText').classList.remove('live');
+    });
+  });
+}
+</script>
+</body>
+</html>
